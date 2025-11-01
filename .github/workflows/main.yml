@@ -33,7 +33,19 @@ jobs:
     - name: Install dependencies
       run: |
         choco install -y python visualstudio2019buildtools windows-sdk-10.0
-
+    - name: Configure gclient
+      run: |
+        cd chromium/src
+        gclient config --name=src https://chromium.googlesource.com/chromium/src.git
+        
+    - name: Setup Git config for depot_tools
+      run: |
+        git config --global core.autocrlf false
+        git config --global core.filemode false
+        git config --global core.fscache true
+        git config --global core.preloadindex true
+        git config --global depot-tools.allowGlobalGitConfig true
+        
     - name: Run gclient sync
       run: |
         cd chromium/src
