@@ -69,6 +69,11 @@ jobs:
         mkdir -Force out/Release
         $args | Out-File -FilePath out/Release/args.gn -Encoding ASCII
 
+    - name: Generate Ninja build files with GN
+        run: |
+          cd chromium/src
+          gn gen out/Release
+          
     - name: Build Chromium
       run: |
         cd chromium/src
