@@ -1,0 +1,121 @@
+name: Build Chromium Win64 on Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  DEPOT_TOOLS_LINUX_TOOLCHAIN: 1
+
+jobs:
+  build:
+    name: Cross-compile Chromium for Windows x64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+    - name: Checkout custom repository
+      uses: actions/checkout@v4
+      with:
+        path: custom-repo
+
+    - name: Checkout depot_tools
+      uses: actions/checkout@v4
+      with:
+        repository: chromium/tools/depot_tools
+        path: depot_tools
+
+    - name: Setup environment
+      run: |
+        echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+        sudo apt-get update
+        sudo apt-get install -y \
+          git python3 python3-pip ninja-build clang lld \
+          libnss3-dev libatk-bridge2.0-dev libxkbcommon-dev \
+          libxss-dev libasound2-dev
+
+    - name: Fetch Chromium source
+      run: |
+        mkdir chromium
+        cd chromium
+        fetch --no-history chromium
+      env:
+        DEPOT_TOOLS_UPDATE: 0
+
+    - name: Sync dependencies
+      run: |
+        cd chromium/src
+        gclient sync --with_branch_heads --with_tags --no-history -D
+
+    - name: Modify about page directly
+      run: |
+        cd chromium/src
+        ABOUT_PAGE="chrome/browser/resources/settings/about_page/about_page.html"
+    
+        # 确保目录存在
+        mkdir -p $(dirname "$ABOUT_PAGE")
+    
+        # 获取GMT+8时间
+        BUILD_TIME=$(python3 -c "
+        import datetime
+        now = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+        print(now.strftime('%Y.%m.%d %H:%M:%S GMT+8'))
+        ")
+    
+        # 在许可证信息后添加自定义信息
+        sed -i '/<div class="secondary">$i18nRaw{aboutProductLicense}<\/div>/a\
+        <div class="secondary">编译者：guoyujie666 | 编译时间：'"$BUILD_TIME"' | 由 Github Actions 强力驱动 | 时候到了，花自然会开，她自然会来.</div>' "$ABOUT_PAGE"
+    
+        echo "修改后的内容："
+        grep -A2 -B2 "编译者" "$ABOUT_PAGE"
+
+    - name: Configure GN for Windows cross-compile
+      run: |
+        cd chromium/src
+        mkdir -p out/ReleaseWin64
+        
+        cat > out/ReleaseWin64/args.gn << 'EOF'
+        target_os = "win"
+        target_cpu = "x64"
+        is_debug = false
+        is_component_build = false
+        is_official_build = false
+        enable_nacl = false
+        proprietary_codecs = true
+        ffmpeg_branding = "Chrome"
+        use_sysroot = true
+        use_goma = false
+        symbol_level = 1
+        EOF
+
+    - name: Generate build files
+      run: |
+        cd chromium/src
+        gn gen out/ReleaseWin64
+
+    - name: Build Chromium for Windows
+      run: |
+        cd chromium/src
+        autoninja -C out/ReleaseWin64 chrome
+        autoninja -C out/ReleaseWin64 mini_installer
+
+    - name: Verify build output
+      run: |
+        cd chromium/src/out/ReleaseWin64
+        echo "=== 生成的文件 ==="
+        ls -la *.exe *.dll | head -10
+        echo "=== Chrome 版本信息 ==="
+        if command -v strings &> /dev/null; then
+          strings chrome.exe | grep -i "chromium" | head -5 || true
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: custom-chromium-win64
+        path: |
+          chromium/src/out/ReleaseWin64/chrome.exe
+          chromium/src/out/ReleaseWin64/*.dll
+          chromium/src/out/ReleaseWin64/mini_installer.exe
+        retention-days: 30
