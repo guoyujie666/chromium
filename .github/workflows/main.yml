@@ -1,0 +1,84 @@
+name: Build Chromium Win64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  DEPOT_TOOLS_WIN_TOOLCHAIN: 0
+  CHROMIUM_BUILDER: 1
+
+jobs:
+  build:
+    name: Build Chromium for Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+    - name: Checkout Chromium source code
+      uses: actions/checkout@v4
+      with:
+        repository: chromium/chromium
+        ref: main
+        path: chromium/src
+
+    - name: Set up depot_tools
+      run: |
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "$env:GITHUB_WORKSPACE\depot_tools" >> $env:GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        choco install -y python visualstudio2019buildtools windows-sdk-10.0
+
+    - name: Run gclient sync
+      run: |
+        cd chromium/src
+        gclient sync --no-history --force
+
+    - name: Configure GN args
+      run: |
+        cd chromium/src
+        $args = @'
+        target_os="win"
+        target_cpu="x64"
+        is_component_build=false
+        is_debug=false
+        is_official_build=true
+        enable_nacl=false
+        proprietary_codecs=true
+        ffmpeg_branding="Chrome"
+        use_goma=false
+        dcheck_always_on=false
+        '@
+        mkdir -Force out/Release
+        $args | Out-File -FilePath out/Release/args.gn -Encoding ASCII
+
+    - name: Build Chromium
+      run: |
+        cd chromium/src
+        autoninja -C out/Release chrome
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: chromium-win64
+        path: |
+          chromium/src/out/Release/chrome.exe
+          chromium/src/out/Release/*.dll
+        retention-days: 7
+
+    - name: Create mini_installer
+      run: |
+        cd chromium/src
+        autoninja -C out/Release mini_installer
+
+    - name: Upload installer
+      uses: actions/upload-artifact@v4
+      with:
+        name: chromium-installer
+        path: chromium/src/out/Release/mini_installer.exe
+        retention-days: 7
